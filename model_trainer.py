@@ -68,12 +68,6 @@ def train_and_evaluate(csv_path, task_name, output_dir):
     if 'RPE' in df.columns:
         target_column = 'RPE'
         print("Using 'RPE' as target column.")
-    elif 'Borg' in df.columns:
-        target_column = 'Borg'
-        print("Using 'BORG' as target column. This appears to be the equivalent of RPE in this dataset.")
-    else:
-        print(f"Error: Neither 'RPE' nor 'BORG' column found in the dataset. Available columns: {df.columns.tolist()}")
-        return
 
     # Drop rows with missing target values
     df = df.dropna(subset=[target_column])
