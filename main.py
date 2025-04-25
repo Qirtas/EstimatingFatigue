@@ -2,6 +2,7 @@ from model_trainer import train_task
 import os
 from borg_labeling import load_data, assign_rpe_to_repetitions, restructure_borg_data, process_all_tasks
 from add_borg_cubic_to_features import add_cubic_borg_to_features_for_all_tasks
+from PatriciaFeaturesFiltering import filter_emg_features
 
 if __name__ == '__main__':
 
@@ -44,23 +45,36 @@ if __name__ == '__main__':
 
 # Patricia Dataset Individual Tasks
 
-    patricia_tasks = ['StSh25', 'StSh45', 'StEl25', 'StEl45', 'DySh25', 'DySh45', 'DyEl25', 'DyEl25']
+    patricia_tasks = ['StSh25', 'StSh45', 'StEl25', 'StEl45', 'DySh25', 'DySh45', 'DyEl25', 'DyEl45']
 
     IMU_Sensors_Patricia = ['Forearm', 'Torso', 'Hand', 'Shoulder', 'Upperarm']
     EMG_Sensors_Patricia = ["Del", "Trap", "Lat"]
+    emg_muscles = ["Del", "Trap", "Bicep", "Tricep", "Lat"]
 
     patricia_features_directory = "/Volumes/Visentin_Re/EstimatingFatigue/PatriciaDataset/Features/Labeled"
 
-    
+    # # List of excluded EMG sensors
+    # excluded_sensors = ["Bicep", "Tricep"]
+    #
+    # print(f"Filtering out features containing any of these sensor names: {', '.join(excluded_sensors)}")
+    #
+    # # Filter the features
+    # removed_counts = filter_emg_features(patricia_features_directory, excluded_sensors)
+    #
+    # # Print summary
+    # print("\nSummary of removed features:")
+    # for task, count in removed_counts.items():
+    #     print(f"Task {task}: Removed {count} features")
+    #
+    # print("\nFeature filtering completed successfully!")
 
-    # for task in patricia_tasks:
-    #     patricia_labeled_task_features = f"{patricia_features_directory}/{task}/labeled_features_{task}.csv"
-    #     print(patricia_labeled_task_features)
-    #
-    #     patricia_labeled_dir = f"/Volumes/Visentin_Re/EstimatingFatigue/PatriciaDataset/Features/Labeled/"
-    #     patricia_models_results_dir = "/Volumes/Visentin_Re/EstimatingFatigue/PatriciaDataset/Models"
-    #
-    #     # Train models for all tasks
-    #     all_task_metrics = train_task(patricia_labeled_dir, patricia_models_results_dir, task)
-    #
-    #     print(f"\n[SUCCESS] Model training complete for {task}")
+    # Train Individual Task Models
+
+    for task in patricia_tasks:
+        patricia_labeled_dir = f"/Volumes/Visentin_Re/EstimatingFatigue/PatriciaDataset/Features/Labeled/"
+        patricia_models_results_dir = "/Volumes/Visentin_Re/EstimatingFatigue/PatriciaDataset/Models"
+
+        # Train models for all tasks
+        all_task_metrics = train_task(patricia_labeled_dir, patricia_models_results_dir, task)
+
+        print(f"\n[SUCCESS] Model training complete for {task}")
