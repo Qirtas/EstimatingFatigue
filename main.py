@@ -1,10 +1,14 @@
-from model_trainer import train_task
+from model_trainer import train_task, train_baseline_model
 import os
 from borg_labeling import load_data, assign_rpe_to_repetitions, restructure_borg_data, process_all_tasks
 from add_borg_cubic_to_features import add_cubic_borg_to_features_for_all_tasks
 from PatriciaFeaturesFiltering import filter_emg_features
 from MarcoCombinedTasks import merge_marco_tasks
 from PatriciaCombinedTasks import merge_patricia_tasks
+from SensorOptimisation.sensorImportanceAnalysis import ranking_sensor_importance
+from SensorOptimisation.SensorsFiltering import make_sensor_subsets
+from SensorOptimisation.AggregatedFeatureImportanceAnalysis import aggregate_sensor_importance
+from FeaturesImportance.featureImpVisualisation import load_feature_importance_scores, aggregate_and_select_features, normalize_scores, create_heatmap
 
 if __name__ == '__main__':
 
@@ -136,7 +140,7 @@ if __name__ == '__main__':
 
 # ------------------------------------------------------------------------------------
 
-# Marco Patricia Merged
+    # Marco Patricia Merged
 
     # both_merged_labeled_dir = f"/Volumes/Visentin_Re/EstimatingFatigue/"
     # both_merged_models_results_dir = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Models"
@@ -147,6 +151,106 @@ if __name__ == '__main__':
 
 # ------------------------------------------------------------------------------------
 
-    # Sensor optimisation for both datasets combined
+    # Step 3: Sensor optimisation for both datasets combined
+
+    # feature_sensor_mapping_file = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/FeatureSensorMapping/all_feature_mappings.csv"
+    #
+    # feature_importance_dir = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/FeatureImportanceScores"
+    # sensor_importance_results = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/FeatureImportanceScores/SensorImportance/"
+    #
+    # results = ranking_sensor_importance(
+    #     feature_mapping_path=feature_sensor_mapping_file,
+    #     feature_importance_dir=feature_importance_dir,
+    #     output_dir=sensor_importance_results
+    # )
 
 
+    # # Step 4: Aggregating Sensors Importance Across All Tasks
+    #
+    # feature_importance_dir = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/FeatureImportanceScores"
+    # aggregated_sensor_imp_results = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/FeatureImpAnalysis/aggregated_sensor_importance.csv"
+    #
+    # # Process all files in the directory and save results
+    # aggregated_importance = aggregate_sensor_importance(
+    #     importance_dir=feature_importance_dir,
+    #     output_path=aggregated_sensor_imp_results,
+    #     threshold=0.1
+    # )
+    #
+    # # Print results
+    # print(aggregated_importance)
+
+
+    # # Step 5: Features Filtering Based on Subset Sensors
+    #
+    # tasks_dir = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/TasksFeatureFiles"  # Directory with labeled_features_*.csv files
+    # features_importance_file = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/FeatureImpAnalysis/aggregated_sensor_importance.csv"
+    # sensor_subsets_output_dir = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/FilteredSensorSubsets"
+    #
+    # make_sensor_subsets(tasks_dir, features_importance_file, sensor_subsets_output_dir, max_subset_size=8)
+
+    # Step 6: Models Training for each sensor subset
+
+    # Sensor Subsets Model Training
+
+    # base_labeled_dir = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/FilteredSensorSubsets/BothMerged"
+    # sensor_subsets_models_result_dir = "/Volumes/Visentin_Re/EstimatingFatigue/Models/AblationResults"
+    #
+    # # Number of subsets to process
+    # num_subsets = 8  # Change this if you have a different number of subsets
+    #
+    # # Loop through each subset
+    # for subset_num in range(1, num_subsets + 1):
+    #     print(f"\n{'=' * 50}")
+    #     print(f"Processing Subset {subset_num}")
+    #     print(f"{'=' * 50}")
+    #
+    #     # Construct path to the specific subset file
+    #     labeled_dir = f"{base_labeled_dir}/subset_{subset_num}_sensors.csv"
+    #
+    #     # Create a unique output folder name for this subset
+    #     output_name = f"AblationAllTasks_Subset{subset_num}"
+    #
+    #     # Train model for this subset
+    #     print(f"Training model for subset {subset_num}...")
+    #     subset_metrics = train_task(labeled_dir, sensor_subsets_models_result_dir, "AblationAllTasks", target_column='RPE')
+    #
+    #     # Optionally, print or process metrics for this subset
+    #     print(f"Completed training for subset {subset_num}")
+    #     print(f"Metrics: {subset_metrics}")
+    #
+    # print("\n[SUCCESS] Model training complete for all AllTasks subsets!")
+
+
+
+# ------------------------------------------------------------------------------------
+
+    # Baseline Model Training
+
+    # both_merged_labeled_file = f"/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/labeled_features_BothMerged.csv"
+    #
+    # output_dir = "/Volumes/Visentin_Re/EstimatingFatigue/BothMerged/Ablation/BaselineModel"
+    #
+    # results = train_baseline_model(
+    #     labeled_features_file=both_merged_labeled_file,
+    #     output_dir=output_dir,
+    #     target_column='RPE',
+    #     subject_column='Subject'
+    # )
+
+
+# ------------------------------------------------------------------------------------
+
+    # Heatmap Feature Importance Analysis
+
+    features_imp_folder_path = "/Volumes/Visentin_Re/EstimatingFatigue/FeaturesImportance"
+    feature_df = load_feature_importance_scores(features_imp_folder_path)
+
+    top_features_df = aggregate_and_select_features(feature_df, top_n=10)
+
+    normalized_df = normalize_scores(top_features_df)
+
+    desired_order = ['AllStatic', 'AllDynamic', 'AllInternal', 'AllExternal', 'BothMerged', 'Aggregated_Importance']
+    normalized_df = normalized_df.reindex(columns=desired_order)
+
+    create_heatmap(normalized_df, title="")

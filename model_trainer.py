@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.model_selection import LeaveOneGroupOut
 import datetime
 from sklearn.model_selection import GroupKFold, cross_val_predict, RandomizedSearchCV
 from sklearn.pipeline import Pipeline
@@ -163,6 +164,8 @@ def train_models(models, X, y, groups, group_kfold, task_name, results_dir):
 
         print(f"{model_name} - MAE: {mae:.4f}, MSE: {mse:.4f}, RMSE: {rmse:.4f}, R2: {r2:.4f}, MAPE: {mape:.2f}%")
         print(f"Plot saved to: {plot_path}")
+
+    compute_and_save_shap(best_model, X, results_dir, task_name, max_display=20, beeswarm_display=10)
 
     return performance_metrics
 
@@ -372,3 +375,276 @@ def train_task(labeled_dir, output_dir, task, analyze_errors=True, combined_task
     #create_all_tasks_summary(all_task_metrics, output_dir)
 
     return all_task_metrics
+
+
+def train_baseline_model(labeled_features_file, output_dir=None, target_column='Borg_Cubic',
+                         subject_column='subject_id'):
+    """
+    Train a simple baseline model that predicts the mean RPE value from the training set.
+    Uses Leave-One-Subject-Out (LOSO) cross-validation.
+
+    Parameters:
+    -----------
+    labeled_features_file : str
+        Path to the CSV file containing labeled features
+    output_dir : str, optional
+        Directory to save output files and plots
+    target_column : str, default='Borg_Cubic'
+        Name of the column containing the target RPE values
+    subject_column : str, default='subject_id'
+        Name of the column containing subject IDs for LOSO CV
+
+    Returns:
+    --------
+    dict
+        Dictionary containing baseline model performance metrics
+    """
+    print(f"Loading data from: {labeled_features_file}")
+
+    # Create output directory if specified
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    # Load the labeled features
+    try:
+        data = pd.read_csv(labeled_features_file)
+        print(f"Loaded data with {data.shape[0]} samples and {data.shape[1]} columns")
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        return None
+
+    # Check if required columns exist
+    if target_column not in data.columns:
+        print(f"Error: Target column '{target_column}' not found in data")
+        return None
+
+    if subject_column not in data.columns:
+        print(f"Error: Subject column '{subject_column}' not found in data")
+        return None
+
+    # Drop rows with missing target values
+    initial_count = data.shape[0]
+    data = data.dropna(subset=[target_column])
+    if initial_count > data.shape[0]:
+        print(f"Dropped {initial_count - data.shape[0]} rows with missing target values")
+
+    # Extract target variable and subject IDs
+    y = data[target_column]
+    subjects = data[subject_column]
+
+    # Set up arrays to store predictions and actuals
+    y_true_all = []
+    y_pred_all = []
+    subject_ids_all = []
+    training_means = []
+
+    # Perform Leave-One-Subject-Out cross-validation
+    print("Performing Leave-One-Subject-Out cross-validation...")
+    logo = LeaveOneGroupOut()
+
+    for train_idx, test_idx in logo.split(data, y, subjects):
+        # Get training and test data for this fold
+        y_train = y.iloc[train_idx]
+        y_test = y.iloc[test_idx]
+        subjects_test = subjects.iloc[test_idx]
+
+        # Calculate mean RPE from training set (our baseline model)
+        mean_rpe = y_train.mean()
+        training_means.append(mean_rpe)
+
+        # Predict the mean RPE for all test samples
+        y_pred = np.full_like(y_test, mean_rpe)
+
+        # Store actuals and predictions
+        y_true_all.extend(y_test.tolist())
+        y_pred_all.extend(y_pred.tolist())
+        subject_ids_all.extend(subjects_test.tolist())
+
+    # Calculate overall performance metrics
+    mae = mean_absolute_error(y_true_all, y_pred_all)
+    rmse = np.sqrt(mean_squared_error(y_true_all, y_pred_all))
+    r2 = r2_score(y_true_all, y_pred_all)
+
+    print("Baseline model performance:")
+    print(f"  MAE: {mae:.4f}")
+    print(f"  RMSE: {rmse:.4f}")
+    print(f"  R²: {r2:.4f}")
+
+    # Calculate per-subject metrics
+    subject_metrics = {}
+    unique_subjects = np.unique(subject_ids_all)
+
+    print(f"Calculating metrics for {len(unique_subjects)} individual subjects...")
+
+    for subject in unique_subjects:
+        # Get indices for this subject
+        subject_indices = [i for i, s in enumerate(subject_ids_all) if s == subject]
+
+        # Get actual and predicted values for this subject
+        subject_y_true = [y_true_all[i] for i in subject_indices]
+        subject_y_pred = [y_pred_all[i] for i in subject_indices]
+
+        # Calculate metrics
+        subject_mae = mean_absolute_error(subject_y_true, subject_y_pred)
+        subject_rmse = np.sqrt(mean_squared_error(subject_y_true, subject_y_pred))
+
+        # Store metrics
+        subject_metrics[subject] = {
+            'mae': subject_mae,
+            'rmse': subject_rmse,
+            'samples': len(subject_indices)
+        }
+
+    # Create a DataFrame for subject-wise metrics
+    subject_metrics_df = pd.DataFrame([
+        {'subject_id': subject, 'mae': metrics['mae'], 'rmse': metrics['rmse'], 'samples': metrics['samples']}
+        for subject, metrics in subject_metrics.items()
+    ])
+
+    # Sort by RMSE
+    subject_metrics_df = subject_metrics_df.sort_values('rmse')
+
+    # Save results if output directory is specified
+    if output_dir:
+        # Save predictions and actuals
+        results_df = pd.DataFrame({
+            'subject_id': subject_ids_all,
+            'actual': y_true_all,
+            'predicted': y_pred_all,
+            'error': np.array(y_true_all) - np.array(y_pred_all)
+        })
+
+        results_path = os.path.join(output_dir, 'baseline_predictions.csv')
+        results_df.to_csv(results_path, index=False)
+        print(f"Saved prediction results to: {results_path}")
+
+        # Save subject metrics
+        metrics_path = os.path.join(output_dir, 'baseline_subject_metrics.csv')
+        subject_metrics_df.to_csv(metrics_path, index=False)
+        print(f"Saved subject metrics to: {metrics_path}")
+
+        # Create scatter plot of actual vs predicted
+        plt.figure(figsize=(10, 8))
+        plt.scatter(y_true_all, y_pred_all, alpha=0.5)
+        plt.plot([min(y_true_all), max(y_true_all)], [min(y_true_all), max(y_true_all)], 'r--')
+        plt.xlabel('Actual RPE')
+        plt.ylabel('Predicted RPE')
+        plt.title('Actual vs Predicted RPE (Baseline Model)')
+        plt.savefig(os.path.join(output_dir, 'baseline_scatter_plot.png'), dpi=300)
+        plt.close()
+
+        # Create distribution plot of errors
+        plt.figure(figsize=(10, 6))
+        errors = np.array(y_true_all) - np.array(y_pred_all)
+        sns.histplot(errors, kde=True)
+        plt.xlabel('Prediction Error')
+        plt.ylabel('Frequency')
+        plt.title('Distribution of Prediction Errors (Baseline Model)')
+        plt.savefig(os.path.join(output_dir, 'baseline_error_distribution.png'), dpi=300)
+        plt.close()
+
+        # Create subject-wise bar chart of RMSE
+        plt.figure(figsize=(14, 8))
+        sns.barplot(x='subject_id', y='rmse', data=subject_metrics_df)
+        plt.xticks(rotation=90)
+        plt.xlabel('Subject ID')
+        plt.ylabel('RMSE')
+        plt.title('RMSE by Subject (Baseline Model)')
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, 'baseline_subject_rmse.png'), dpi=300)
+        plt.close()
+
+    # Return overall metrics and subject-wise metrics
+    return {
+        'overall_metrics': {
+            'mae': mae,
+            'rmse': rmse,
+            'r2': r2
+        },
+        'subject_metrics': subject_metrics,
+        'training_means': np.mean(training_means),
+        'predictions': {
+            'y_true': y_true_all,
+            'y_pred': y_pred_all,
+            'subject_ids': subject_ids_all
+        }
+    }
+
+
+
+import shap
+import matplotlib.pyplot as plt
+import os
+
+
+def compute_and_save_shap(model, X, save_dir, task_name, max_display=10, beeswarm_display=10):
+    print(f"[INFO] Computing SHAP values for task {task_name}...")
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Extract the actual regressor from the pipeline
+    if hasattr(model, "named_steps"):
+        # Apply the preprocessing steps from the pipeline first
+        # (but not the regressor itself)
+        preprocessed_X = X
+        if 'variance_filter' in model.named_steps:
+            preprocessed_X = model.named_steps['variance_filter'].transform(preprocessed_X)
+        if 'scaler' in model.named_steps:
+            preprocessed_X = model.named_steps['scaler'].transform(preprocessed_X)
+
+        # Convert back to DataFrame with feature names (important for meaningful SHAP plots)
+        if hasattr(model.named_steps['variance_filter'], 'get_support'):
+            feature_mask = model.named_steps['variance_filter'].get_support()
+            selected_features = X.columns[feature_mask]
+            preprocessed_X = pd.DataFrame(preprocessed_X, columns=selected_features)
+
+        # Get the regressor
+        model_regressor = model.named_steps['regressor']
+    else:
+        print("[ERROR] Model is not a sklearn pipeline with named steps!")
+        return None
+
+    # Use TreeExplainer for XGBoost
+    explainer = shap.TreeExplainer(model_regressor)
+
+    # Use the preprocessed data for SHAP values
+    shap_values = explainer.shap_values(preprocessed_X)
+
+    # Save SHAP values as CSV with the correct feature names
+    shap_df = pd.DataFrame(shap_values, columns=preprocessed_X.columns)
+    shap_csv_path = os.path.join(save_dir, f"shap_values_{task_name}.csv")
+    shap_df.to_csv(shap_csv_path, index=False)
+    print(f"[INFO] SHAP values saved to {shap_csv_path}")
+
+    # 1. Generate and save SHAP summary bar plot
+    plt.figure(figsize=(10, 8))
+    shap.summary_plot(shap_values, preprocessed_X, show=False, plot_type="bar", max_display=max_display)
+    shap_summary_plot_path = os.path.join(save_dir, f"shap_summary_bar_{task_name}.png")
+    plt.tight_layout()
+    plt.savefig(shap_summary_plot_path, dpi=300)
+    plt.close()
+    print(f"[INFO] SHAP summary bar plot saved to {shap_summary_plot_path}")
+
+    # 2. Generate and save SHAP beeswarm plot with top 10 features
+    plt.figure(figsize=(12, 8))
+    shap.summary_plot(shap_values, preprocessed_X, show=False, plot_type="dot", max_display=beeswarm_display)
+    shap_beeswarm_plot_path = os.path.join(save_dir, f"shap_beeswarm_{task_name}.png")
+    plt.tight_layout()
+    plt.savefig(shap_beeswarm_plot_path, dpi=300)
+    plt.close()
+    print(f"[INFO] SHAP beeswarm plot saved to {shap_beeswarm_plot_path}")
+
+    # # 3. Optional: Generate and save SHAP waterfall plot for a sample instance
+    # # This shows how individual features contribute to a specific prediction
+    # if len(preprocessed_X) > 0:
+    #     # Select a representative sample (e.g., one with median prediction)
+    #     sample_idx = 0  # You could use a more sophisticated selection method
+    #     plt.figure(figsize=(10, 8))
+    #     shap.plots.waterfall(explainer.expected_value, shap_values[sample_idx],
+    #                          features=preprocessed_X.iloc[sample_idx], max_display=10, show=False)
+    #     shap_waterfall_path = os.path.join(save_dir, f"shap_waterfall_sample_{task_name}.png")
+    #     plt.tight_layout()
+    #     plt.savefig(shap_waterfall_path, dpi=300)
+    #     plt.close()
+    #     print(f"[INFO] SHAP waterfall plot saved to {shap_waterfall_path}")
+
+    return shap_values
